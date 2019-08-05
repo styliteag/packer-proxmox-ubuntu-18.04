@@ -1,0 +1,128 @@
+{
+  "variables": {
+
+    "proxmox_host": "node1",
+    "proxmox_api_user": "root@pam",
+    "proxmox_api_password": "password",
+
+    "ubuntu_release": "bionic",
+
+    "ssh_fullname": "ubuntu",
+    "ssh_password": "ubuntu",
+    "ssh_username": "ubuntu",
+
+    "vmid": "9900",
+    "hostname": "ubuntu-cloudinit-18-04",
+
+    "datastore": "local-kvm",
+    "datastore_type": "lvm-thin",
+
+    "iso": "cephfs:iso/ubuntu-18.04.2-server-amd64.iso",
+
+    "boot_command_prefix": "<esc><esc><enter><wait>",
+    "locale": "en_US"
+  },
+  "builders": [
+    {
+      "type": "proxmox",
+      "proxmox_url": "https://{{user `proxmox_host`}}:8006/api2/json",
+      "insecure_skip_tls_verify": true,
+      "username": "{{user `proxmox_api_user`}}",
+      "password": "{{user `proxmox_api_password`}}",
+
+      "vm_name": "{{user `hostname`}}",
+      "vm_id": "{{user `vmid`}}",
+      "node": "{{user `proxmox_host`}}",
+      "memory": 4096,
+      "sockets": 2,
+      "cores": 2,
+      "os": "l26",
+      "network_adapters": [
+        {
+          "model": "virtio",
+          "bridge": "vmbr0"
+        }
+      ],
+      "disks": [
+        {
+          "type": "scsi",
+          "disk_size": "10G",
+          "storage_pool": "{{user `datastore`}}",
+          "storage_pool_type": "{{user `datastore_type`}}",
+          "format": "raw",
+          "cache_mode": "writeback"
+        }
+      ],
+      "qemu_agent": true,
+
+      "iso_file": "{{user `iso`}}",
+      "http_directory":"./http",
+      "boot_wait": "10s",
+      "boot_command": [
+        "{{ user `boot_command_prefix` }}",
+        "/install/vmlinuz ",
+        "auto ",
+        "console-setup/ask_detect=false ",
+        "debconf/frontend=noninteractive ",
+        "debian-installer={{ user `locale` }} ",
+        "hostname={{ user `hostname` }} ",
+        "fb=false ",
+        "grub-installer/bootdev=/dev/sda<wait> ",
+        "initrd=/install/initrd.gz ",
+        "kbd-chooser/method=us ",
+        "keyboard-configuration/modelcode=SKIP ",
+        "locale={{ user `locale` }} ",
+        "noapic ",
+        "passwd/username={{ user `ssh_username` }} ",
+        "passwd/user-fullname={{ user `ssh_fullname` }} ",
+        "passwd/user-password={{ user `ssh_password` }} ",
+        "passwd/user-password-again={{ user `ssh_password` }} ",
+        "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed.cfg ",
+        "-- <enter>"
+      ],
+
+      "ssh_password": "{{ user `ssh_password` }}",
+      "ssh_timeout": "90m",
+      "ssh_username": "{{ user `ssh_username` }}",
+
+      "unmount_iso": true,
+      "template_description": "Ubuntu 18.04.02, generated on {{ isotime \"2006-01-02T15:04:05Z\" }}"
+    }
+  ],
+  "provisioners": [
+    {
+      "pause_before": "20s",
+      "type": "shell",
+      "inline": [
+        "date > provision.txt",
+        "sudo apt-get update",
+        "sudo apt-get -y upgrade",
+        "sudo apt-get -y dist-upgrade",
+        "sudo apt-get -y install linux-generic linux-headers-generic linux-image-generic",
+        "sudo apt-get -y install qemu-guest-agent cloud-init",
+        "sudo apt-get -y install procps iputils-ping telnet netcat mc wget curl dnsutils iproute2 vim tcpdump",
+        "# sudo apt-get install -y --install-recommends linux-virtual linux-tools-virtual linux-cloud-tools-virtual",
+        "exit 0"
+      ]
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "shell-local",
+      "inline": [
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --scsihw virtio-scsi-pci",
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --ide2 {{user `datastore`}}:cloudinit",
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --boot c --bootdisk scsi0",
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --ciuser     {{ user `ssh_username` }}",        
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --cipassword {{ user `ssh_password` }}",        
+        "scp ~/.ssh/id_ed25519.pub {{user `proxmox_host`}}:/tmp/key1.pub",
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --sshkey /tmp/key1.pub",        
+        "# ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --sshkey /tmp/key2.pub",        
+        "# ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --ipconfig0 ip=10.0.10.123/24,gw=10.0.10.1",        
+        "ssh {{user `proxmox_host`}} qm set {{user `vmid`}} --vga std",
+        "ssh {{user `proxmox_host`}} qm cloudinit dump {{user `vmid`}} user"      
+      ]
+    }
+  ]
+
+}
